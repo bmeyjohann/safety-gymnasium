@@ -20,7 +20,10 @@ from gymnasium import make as gymnasium_make
 from gymnasium import register as gymnasium_register
 
 from safety_gymnasium import vector, wrappers
-from safety_gymnasium.tasks.safe_multi_agent.tasks.velocity.safe_mujoco_multi import make_ma
+try:
+    from safety_gymnasium.tasks.safe_multi_agent.tasks.velocity.safe_mujoco_multi import make_ma  # noqa: F401
+except Exception:
+    make_ma = None  # type: ignore
 from safety_gymnasium.utils.registration import make, register
 from safety_gymnasium.version import __version__
 

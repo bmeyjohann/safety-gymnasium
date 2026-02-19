@@ -15,7 +15,10 @@
 """Wrapper for limiting the time steps of an environment."""
 
 
-from gymnasium.wrappers.time_limit import TimeLimit
+try:
+    from gymnasium.wrappers.time_limit import TimeLimit
+except Exception:  # gymnasium>=1.0
+    from gymnasium.wrappers import TimeLimit  # type: ignore
 
 
 class SafeTimeLimit(TimeLimit):

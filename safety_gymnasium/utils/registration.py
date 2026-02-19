@@ -26,7 +26,24 @@ from gymnasium.envs.registration import spec  # noqa: F401 # pylint: disable=unu
 from gymnasium.envs.registration import EnvSpec, _check_metadata, _find_spec, load_env_creator
 from gymnasium.envs.registration import register as gymnasium_register
 from gymnasium.wrappers import HumanRendering, OrderEnforcing, RenderCollection
-from gymnasium.wrappers.compatibility import EnvCompatibility
+try:
+    from gymnasium.wrappers.compatibility import EnvCompatibility
+except Exception:  # gymnasium>=1.0 removed wrappers.compatibility
+    class EnvCompatibility:  # type: ignore
+        """Minimal compatibility shim when Gymnasium compatibility wrapper is unavailable."""
+
+        def __init__(self, env, render_mode=None):
+            self.env = env
+            self.render_mode = render_mode
+
+        def __getattr__(self, item):
+            return getattr(self.env, item)
+
+        def step(self, action):
+            return self.env.step(action)
+
+        def reset(self, *args, **kwargs):
+            return self.env.reset(*args, **kwargs)
 
 from safety_gymnasium.wrappers import SafeAutoResetWrapper, SafePassiveEnvChecker, SafeTimeLimit
 
@@ -95,6 +112,8 @@ def make(
         env_spec = _find_spec(id)
 
     assert isinstance(env_spec, EnvSpec)
+    spec_apply_api_compat = bool(getattr(env_spec, 'apply_api_compatibility', False))
+    spec_autoreset = bool(getattr(env_spec, 'autoreset', False))
 
     # Update the env spec kwargs with the `make` kwargs
     env_spec_kwargs = copy.deepcopy(env_spec.kwargs)
@@ -153,9 +172,7 @@ def make(
                 f'that is not in the possible render_modes ({render_modes}).',
             )
 
-    if apply_api_compatibility or (
-        apply_api_compatibility is None and env_spec.apply_api_compatibility
-    ):
+    if apply_api_compatibility or (apply_api_compatibility is None and spec_apply_api_compat):
         # If we use the compatibility layer, we treat the render mode explicitly and don't pass it to the env creator
         render_mode = env_spec_kwargs.pop('render_mode', None)
     else:
@@ -183,9 +200,7 @@ def make(
         nondeterministic=env_spec.nondeterministic,
         max_episode_steps=None,
         order_enforce=False,
-        autoreset=False,
         disable_env_checker=True,
-        apply_api_compatibility=False,
         kwargs=env_spec_kwargs,
         additional_wrappers=(),
         vector_entry_point=env_spec.vector_entry_point,
@@ -206,7 +221,7 @@ def make(
 
     # Add step API wrapper
     if apply_api_compatibility is True or (
-        apply_api_compatibility is None and env_spec.apply_api_compatibility is True
+        apply_api_compatibility is None and spec_apply_api_compat is True
     ):
         env = EnvCompatibility(env, render_mode)
 
@@ -227,7 +242,7 @@ def make(
         env = SafeTimeLimit(env, env_spec.max_episode_steps)
 
     # Add the auto-reset wrapper
-    if autoreset is True or (autoreset is None and env_spec.autoreset is True):
+    if autoreset is True or (autoreset is None and spec_autoreset is True):
         env = SafeAutoResetWrapper(env)
 
     for wrapper_spec in env_spec.additional_wrappers[num_prior_wrappers:]:

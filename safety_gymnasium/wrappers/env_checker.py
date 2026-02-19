@@ -15,7 +15,10 @@
 """Passive environment checker."""
 
 from gymnasium.core import ActType
-from gymnasium.wrappers.env_checker import PassiveEnvChecker
+try:
+    from gymnasium.wrappers.env_checker import PassiveEnvChecker
+except Exception:  # gymnasium>=1.0
+    from gymnasium.wrappers import PassiveEnvChecker  # type: ignore
 
 from safety_gymnasium.utils.passive_env_checker import env_step_passive_checker
 

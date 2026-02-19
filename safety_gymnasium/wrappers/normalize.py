@@ -17,7 +17,11 @@
 
 import gymnasium
 import numpy as np
-from gymnasium.wrappers.normalize import NormalizeObservation, NormalizeReward, RunningMeanStd
+try:
+    from gymnasium.wrappers.normalize import NormalizeObservation, NormalizeReward, RunningMeanStd
+except Exception:  # gymnasium>=1.0
+    from gymnasium.wrappers import NormalizeObservation, NormalizeReward  # type: ignore
+    from gymnasium.wrappers.utils import RunningMeanStd  # type: ignore
 
 
 class SafeNormalizeObservation(NormalizeObservation):
