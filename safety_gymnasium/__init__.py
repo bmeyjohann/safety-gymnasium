@@ -16,6 +16,27 @@
 
 import copy
 
+# Gymnasium's MuJoCo WindowViewer teardown can throw during Python GC on some
+# Windows package combinations (for example glfw context already destroyed).
+# Treat these as cleanup-only failures and fail open.
+try:
+    from gymnasium.envs.mujoco.mujoco_rendering import WindowViewer as _GymWindowViewer
+
+    _original_window_viewer_free = _GymWindowViewer.free
+
+    def _safe_window_viewer_free(self):  # type: ignore
+        try:
+            _original_window_viewer_free(self)
+        except AttributeError:
+            pass
+        except Exception:
+            pass
+
+    _GymWindowViewer.free = _safe_window_viewer_free  # type: ignore
+    del _original_window_viewer_free
+except Exception:
+    pass
+
 from gymnasium import make as gymnasium_make
 from gymnasium import register as gymnasium_register
 
