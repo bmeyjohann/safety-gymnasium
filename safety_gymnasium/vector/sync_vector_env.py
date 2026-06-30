@@ -23,7 +23,8 @@ import numpy as np
 from gymnasium import Env
 from gymnasium.spaces import Space
 from gymnasium.vector.sync_vector_env import SyncVectorEnv
-from gymnasium.vector.utils import concatenate
+from gymnasium.vector.utils import concatenate, iterate
+from gymnasium.vector.vector_env import AutoresetMode
 
 from safety_gymnasium.vector.utils.tile_images import tile_images
 
@@ -42,7 +43,13 @@ class SafetySyncVectorEnv(SyncVectorEnv):
         copy: bool = True,
     ) -> None:
         """Initializes the vectorized safe environment."""
-        super().__init__(env_fns, observation_space, action_space, copy)
+        if action_space is not None:
+            raise TypeError("This Gymnasium SyncVectorEnv version does not accept an explicit action_space.")
+        super().__init__(
+            env_fns,
+            copy=copy,
+            observation_mode=observation_space if observation_space is not None else "same",
+        )
         self._costs = np.zeros((self.num_envs,), dtype=np.float64)
 
     def render(self) -> np.ndarray:
@@ -51,6 +58,56 @@ class SafetySyncVectorEnv(SyncVectorEnv):
         imgs = self.get_images()
         # tile the images.
         return tile_images(imgs)
+
+    def step(self, actions):
+        """Step all environments and preserve Safety-Gymnasium's cost return."""
+        actions = iterate(self.action_space, actions)
+
+        infos = {}
+        for i, action in enumerate(actions):
+            if self.autoreset_mode == AutoresetMode.NEXT_STEP and self._autoreset_envs[i]:
+                self._env_obs[i], env_info = self.envs[i].reset()
+                self._rewards[i] = 0.0
+                self._costs[i] = 0.0
+                self._terminations[i] = False
+                self._truncations[i] = False
+            else:
+                (
+                    self._env_obs[i],
+                    self._rewards[i],
+                    self._costs[i],
+                    self._terminations[i],
+                    self._truncations[i],
+                    env_info,
+                ) = self.envs[i].step(action)
+
+                if self.autoreset_mode == AutoresetMode.SAME_STEP and (
+                    self._terminations[i] or self._truncations[i]
+                ):
+                    infos = self._add_info(
+                        infos,
+                        {"final_obs": self._env_obs[i], "final_info": env_info},
+                        i,
+                    )
+                    self._env_obs[i], env_info = self.envs[i].reset()
+
+            infos = self._add_info(infos, env_info, i)
+
+        self._observations = concatenate(
+            self.single_observation_space,
+            self._env_obs,
+            self._observations,
+        )
+        self._autoreset_envs = np.logical_or(self._terminations, self._truncations)
+
+        return (
+            deepcopy(self._observations) if self.copy else self._observations,
+            np.copy(self._rewards),
+            np.copy(self._costs),
+            np.copy(self._terminations),
+            np.copy(self._truncations),
+            infos,
+        )
 
     def step_wait(
         self,

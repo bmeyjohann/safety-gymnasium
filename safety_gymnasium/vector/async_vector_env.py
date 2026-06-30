@@ -63,15 +63,16 @@ class SafetyAsyncVectorEnv(AsyncVectorEnv):
         """
         target = _worker_shared_memory if shared_memory else _worker
         target = worker or target
+        if action_space is not None:
+            raise TypeError("This Gymnasium AsyncVectorEnv version does not accept an explicit action_space.")
         super().__init__(
             env_fns,
-            observation_space,
-            action_space,
-            shared_memory,
-            copy,
-            context,
-            daemon,
+            shared_memory=shared_memory,
+            copy=copy,
+            context=context,
+            daemon=daemon,
             worker=target,
+            observation_mode=observation_space if observation_space is not None else "same",
         )
 
     def get_images(self):
