@@ -28,6 +28,124 @@ class KeyboardViewer(WindowViewer):  # pylint: disable=too-many-instance-attribu
         super().__init__(model, data)
         self._custom_key_press_callback = custom_key_press_callback
 
+    def _create_overlay(self):
+        """Create the on-screen menu overlay.
+
+        Gymnasium's upstream implementation switches between `solver_iter` and
+        `solver_niter` based on a string version comparison against MuJoCo.
+        On Windows we have observed builds where that comparison selects the
+        wrong field for the installed bindings, which crashes human rendering.
+        Use attribute presence instead so the local Safety-Gym viewer remains
+        compatible across MuJoCo package variants.
+        """
+        topleft = mujoco.mjtGridPos.mjGRID_TOPLEFT
+        bottomleft = mujoco.mjtGridPos.mjGRID_BOTTOMLEFT
+
+        if self._render_every_frame:
+            self.add_overlay(topleft, "", "")
+        else:
+            self.add_overlay(
+                topleft,
+                "Run speed = %.3f x real time" % self._run_speed,
+                "[S]lower, [F]aster",
+            )
+        self.add_overlay(
+            topleft, "Ren[d]er every frame", "On" if self._render_every_frame else "Off"
+        )
+        self.add_overlay(
+            topleft,
+            "Switch camera (#cams = %d)" % (self.model.ncam + 1),
+            "[Tab] (camera ID = %d)" % self.cam.fixedcamid,
+        )
+        self.add_overlay(topleft, "[C]ontact forces", "On" if self._contacts else "Off")
+        self.add_overlay(topleft, "T[r]ansparent", "On" if self._transparent else "Off")
+        if self._paused is not None:
+            if not self._paused:
+                self.add_overlay(topleft, "Stop", "[Space]")
+            else:
+                self.add_overlay(topleft, "Start", "[Space]")
+                self.add_overlay(
+                    topleft, "Advance simulation by one step", "[right arrow]"
+                )
+        self.add_overlay(
+            topleft, "Referenc[e] frames", "On" if self.vopt.frame == 1 else "Off"
+        )
+        self.add_overlay(topleft, "[H]ide Menu", "")
+        if self._image_idx > 0:
+            fname = self._image_path % (self._image_idx - 1)
+            self.add_overlay(topleft, "Cap[t]ure frame", "Saved as %s" % fname)
+        else:
+            self.add_overlay(topleft, "Cap[t]ure frame", "")
+        self.add_overlay(topleft, "Toggle geomgroup visibility", "0-4")
+
+        self.add_overlay(bottomleft, "FPS", "%d%s" % (1 / self._time_per_render, ""))
+        solver_iterations = None
+        if hasattr(self.data, "solver_niter"):
+            solver_niter = self.data.solver_niter
+            solver_iterations = int(np.asarray(solver_niter).reshape(-1)[0]) + 1
+        elif hasattr(self.data, "solver_iter"):
+            solver_iterations = int(self.data.solver_iter) + 1
+        if solver_iterations is not None:
+            self.add_overlay(bottomleft, "Solver iterations", str(solver_iterations))
+        self.add_overlay(
+            bottomleft, "Step", str(round(self.data.time / self.model.opt.timestep))
+        )
+        self.add_overlay(bottomleft, "timestep", "%.5f" % self.model.opt.timestep)
+
+    def _add_marker_to_scene(self, marker: dict):
+        """Add a marker compatibly across MuJoCo Python binding variants.
+
+        The Windows `thesis` env currently uses a Gymnasium renderer path that
+        assumes legacy `MjvGeom` fields like `texid`. Some MuJoCo bindings no
+        longer expose those fields, which crashes human rendering. Use
+        `mjv_initGeom` and only assign optional attributes that actually exist.
+        """
+        if self.scn.ngeom >= self.scn.maxgeom:
+            raise RuntimeError(f"Ran out of geoms. maxgeom: {self.scn.maxgeom}")
+
+        geom = self.scn.geoms[self.scn.ngeom]
+        geom_type = marker.get("type", mujoco.mjtGeom.mjGEOM_SPHERE)
+        size = np.asarray(marker.get("size", np.array([0.01, 0.01, 0.01])), dtype=np.float64)
+        pos = np.asarray(marker.get("pos", np.array([0.0, 0.0, 0.0])), dtype=np.float64)
+        mat = np.asarray(marker.get("mat", np.eye(3).flatten()), dtype=np.float64)
+        rgba = np.asarray(marker.get("rgba", np.array([1.0, 1.0, 1.0, 1.0])), dtype=np.float32)
+
+        mujoco.mjv_initGeom(
+            geom,
+            geom_type,
+            size=size,
+            pos=pos,
+            mat=mat,
+            rgba=rgba,
+        )
+
+        if hasattr(geom, "category"):
+            geom.category = mujoco.mjtCatBit.mjCAT_DECOR
+
+        for key, value in marker.items():
+            if key in {"type", "size", "pos", "mat", "rgba"}:
+                continue
+            if key == "label":
+                if hasattr(geom, "label"):
+                    if value is None:
+                        geom.label[0] = 0
+                    else:
+                        geom.label = value
+                continue
+            if not hasattr(geom, key):
+                continue
+            attr = getattr(geom, key)
+            if isinstance(value, (tuple, list, np.ndarray)):
+                arr = np.asarray(value)
+                try:
+                    attr[:] = arr.reshape(attr.shape)
+                except Exception:
+                    setattr(geom, key, value)
+            else:
+                setattr(geom, key, value)
+
+        self.scn.ngeom += 1
+
     # pylint: disable-next=too-many-arguments, too-many-branches
     def _key_callback(self, window, key, scancode, action, mods):
         """Callback for keyboard events."""
